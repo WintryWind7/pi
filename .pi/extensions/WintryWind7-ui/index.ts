@@ -8,14 +8,10 @@ import { CustomEditor } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
 import type { KeybindingsManager } from "@earendil-works/pi-coding-agent";
-import { isAbsolute, relative, resolve, sep, join, dirname } from "node:path";
+import { isAbsolute, relative, resolve, sep, join } from "node:path";
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { execSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 function formatTokens(count: number): string {
   if (count < 1000) return count.toString();
@@ -135,19 +131,6 @@ function getGitStatus(): GitStatus | null {
 }
 
 export default function (pi: ExtensionAPI) {
-  // ── Custom system prompt ──
-  const promptPath = join(__dirname, "system-prompt.txt");
-  let customPrompt: string | null = null;
-  try {
-    customPrompt = readFileSync(promptPath, "utf8");
-  } catch { /* prompt file not found, use default */ }
-
-  if (customPrompt) {
-    pi.on("before_agent_start", async () => {
-      return { systemPrompt: customPrompt! };
-    });
-  }
-
   pi.on("session_start", async (_event, ctx) => {
     if (ctx.mode !== "tui") return;
 

@@ -103,6 +103,16 @@ Verify facts with tools before making assertions. Never reason from assumptions 
 - Use `type(scope): description` format for commit messages (Conventional Commits + scope).
 - Rollback defaults to non-destructive: use `--amend` or `--soft` for commit-level issues; use `git restore --source=<commit> -- <file>` for file-specific rollback. Only use `--hard` when the user explicitly requests discarding all changes.
 
+## Non-terminal Operations
+- When running `git commit`, always use `-m` to provide the message inline. Never rely on an interactive editor.
+- When running `git rebase --continue`, always prefix with `GIT_EDITOR=true` to skip editor prompts. Example: `GIT_EDITOR=true git rebase --continue`.
+- This also applies to `git merge --continue`, `git cherry-pick --continue`, and any other Git operation that may spawn an editor.
+
+## Merge Conflicts
+- When a rebase or merge hits a conflict, read the conflicted file to see both sides (marked with `<<<<<<<`, `=======`, `>>>>>>>`).
+- Understand what each side changed and why, then manually resolve by keeping the intended version.
+- After resolving, `git add <file>` then `GIT_EDITOR=true git rebase --continue`.
+
 ## Draft Commit
 - All git write operations (commit, amend, rebase, tag) follow the draft-first workflow: present the full commit message or rebase plan for review, and never execute until approved.
 - "拟定提交" / "拟定commit" / "draft commit" means: present the full, ready-to-use commit message for the user to review, and never execute `git commit` at this stage.

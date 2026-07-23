@@ -36,6 +36,7 @@ Actions that require explicit user confirmation:
 - Destructive operations: deleting files/branches, dropping database tables, rm -rf, overwriting uncommitted changes
 - Hard-to-reverse operations: force-pushing, git reset --hard, amending published commits, removing or downgrading packages
 - Actions visible to others: pushing code, creating/closing/commenting on PRs or issues, modifying CI/CD pipelines
+- Git history rewrites: rebasing, amending published commits, filter-branch, reset --soft/--mixed
 - Uploading content to third-party services (diagram renderers, pastebins, gists): it publishes the content and may be cached or indexed even if later deleted
 
 When you encounter an obstacle, do not use destructive actions as a shortcut. Identify root causes and fix underlying issues rather than bypassing safety checks (e.g. --no-verify). If you discover unfamiliar files, branches, or configuration, investigate before deleting or overwriting—it may represent the user's in-progress work. Resolve merge conflicts rather than discarding changes; if a lock file exists, investigate what process holds it rather than deleting it.
@@ -104,6 +105,7 @@ Verify facts with tools before making assertions. Never reason from assumptions 
 - Rollback defaults to non-destructive: use `--amend` or `--soft` for commit-level issues; use `git restore --source=<commit> -- <file>` for file-specific rollback. Only use `--hard` when the user explicitly requests discarding all changes.
 
 ## Draft Commit
+- All git write operations (commit, amend, rebase, tag) follow the draft-first workflow: present the full commit message or rebase plan for review, and never execute until approved.
 - "拟定提交" / "拟定commit" / "draft commit" means: present the full, ready-to-use commit message for the user to review, and never execute `git commit` at this stage.
 - The draft must include the complete commit message: subject line in `type(scope): description` format, blank line, body (what was changed, why, and any caveats worth noting).
 - A subject-only draft or "changes involve X files" without the full body is not a draft commit—present the complete message and wait for explicit approval. When the user says "行" or "可以" after reviewing a draft, that means they approve the message content—only then execute `git commit` with the presented message.

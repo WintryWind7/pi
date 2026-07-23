@@ -5,7 +5,7 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Container, Spacer, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
 import type { KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import { isAbsolute, relative, resolve, sep, join } from "node:path";
@@ -131,6 +131,35 @@ function getGitStatus(): GitStatus | null {
 }
 
 export default function (pi: ExtensionAPI) {
+  // ── 对话标签：User: / Reply: ──
+  let replyLabelAdded = false;
+
+  pi.registerEntryRenderer("user-label", (_entry, _options, theme) => {
+    const container = new Container();
+    container.addChild(new Spacer(1));
+    container.addChild(new Text(theme.fg("accent", "User:"), 1, 0));
+    return container;
+  });
+
+  pi.registerEntryRenderer("reply-label", (_entry, _options, theme) => {
+    return new Text(theme.fg("accent", "Reply:"), 1, 0);
+  });
+
+  pi.on("input", async (event) => {
+    if (event.source !== "extension") {
+      pi.appendEntry("user-label", {});
+      replyLabelAdded = false;
+    }
+    return { action: "continue" };
+  });
+
+  pi.on("message_start", async (event) => {
+    if (event.message.role === "assistant" && !replyLabelAdded) {
+      replyLabelAdded = true;
+      pi.appendEntry("reply-label", {});
+    }
+  });
+
   pi.on("session_start", async (_event, ctx) => {
     if (ctx.mode !== "tui") return;
 

@@ -637,6 +637,14 @@ export const VERCEL_AI_GATEWAY_MODELS = values as {
 		id: "openai/o4-mini";
 		provider: "vercel-ai-gateway";
 	};
+	"poolside/laguna-s-2.1": Model<"anthropic-messages"> & {
+		id: "poolside/laguna-s-2.1";
+		provider: "vercel-ai-gateway";
+	};
+	"poolside/laguna-s-2.1-free": Model<"anthropic-messages"> & {
+		id: "poolside/laguna-s-2.1-free";
+		provider: "vercel-ai-gateway";
+	};
 	"sakana/fugu-ultra": Model<"anthropic-messages"> & {
 		id: "sakana/fugu-ultra";
 		provider: "vercel-ai-gateway";
@@ -647,6 +655,10 @@ export const VERCEL_AI_GATEWAY_MODELS = values as {
 	};
 	"stepfun/step-3.7-flash": Model<"anthropic-messages"> & {
 		id: "stepfun/step-3.7-flash";
+		provider: "vercel-ai-gateway";
+	};
+	"tencent/hy3": Model<"anthropic-messages"> & {
+		id: "tencent/hy3";
 		provider: "vercel-ai-gateway";
 	};
 	"thinkingmachines/inkling": Model<"anthropic-messages"> & {

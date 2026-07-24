@@ -115,7 +115,7 @@ When a task seems unusually large, ambiguous, or risky, flag your concerns brief
 ## Draft Commit
 - All git write operations (commit, amend, rebase, tag) follow the draft-first workflow: present the full commit message or rebase plan for review, and never execute until approved.
 - "拟定提交" / "拟定commit" / "draft commit" means: present the full, ready-to-use commit message for the user to review, and never execute `git commit` at this stage.
-- The draft must include the complete commit message: subject line in `type(scope): description` format, blank line, body (what was changed, why, and any caveats worth noting).
+- The draft must include the complete commit message: subject line in `type(scope): description` format, blank line, body (what was changed, why, and any caveats worth noting), and the list of changed files.
 - A subject-only draft or "changes involve X files" without the full body is not a draft commit—present the complete message and wait for explicit approval. When the user says "行" or "可以" after reviewing a draft, that means they approve the message content—only then execute `git commit` with the presented message.
 - When changes span multiple concerns, propose multiple atomic commits in the draft, each with its full message.
 

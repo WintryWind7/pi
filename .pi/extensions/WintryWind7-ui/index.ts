@@ -130,7 +130,32 @@ function getGitStatus(): GitStatus | null {
   return status;
 }
 
+// ── Thinking / Working 计时（合并自 thinking-test.ts）──
+function fmtTime(ms: number): string {
+  const s = Math.round(ms / 1000);
+  return s >= 60 ? `${Math.floor(s / 60)}m${s % 60}s` : `${s}s`;
+}
+
 export default function (pi: ExtensionAPI) {
+  // ── Thinking / Working 计时状态 ──
+  let thinkingStartMs: number | null = null;
+  let thinkingDone = false;
+  let thinkingInterval: ReturnType<typeof setInterval> | null = null;
+  let workingStartMs: number | null = null;
+  let workingInterval: ReturnType<typeof setInterval> | null = null;
+
+  const clearTimers = () => {
+    if (thinkingInterval) { clearInterval(thinkingInterval); thinkingInterval = null; }
+    if (workingInterval) { clearInterval(workingInterval); workingInterval = null; }
+  };
+
+  const resetThinking = (ctx: any) => {
+    thinkingStartMs = null;
+    thinkingDone = false;
+    if (thinkingInterval) { clearInterval(thinkingInterval); thinkingInterval = null; }
+    if (ctx?.hasUI) ctx.ui.setHiddenThinkingLabel();
+  };
+
   // ── 对话标签：User: / Reply: ──
   let replyLabelAdded = false;
 
@@ -158,6 +183,75 @@ export default function (pi: ExtensionAPI) {
       replyLabelAdded = true;
       pi.appendEntry("reply-label", {});
     }
+  });
+
+  // ── Working: 总用时（编辑器下方 "Working... (Xs)"）──
+  pi.on("agent_start", (_event, ctx) => {
+    if (!ctx.hasUI) return;
+    resetThinking(ctx);
+    workingStartMs = Date.now();
+    if (workingInterval) clearInterval(workingInterval);
+    workingInterval = setInterval(() => {
+      ctx.ui.setWorkingMessage(`Working... (${fmtTime(Date.now() - workingStartMs!)})`);
+    }, 500);
+  });
+
+  pi.on("agent_end", (_event, ctx) => {
+    if (!ctx.hasUI) return;
+    workingStartMs = null;
+    if (workingInterval) { clearInterval(workingInterval); workingInterval = null; }
+    ctx.ui.setWorkingMessage();
+  });
+
+  // ── Thinking: live 计时 + 结束标签 ──
+  pi.on("message_update", (event, ctx) => {
+    if (!ctx.hasUI) return;
+    if (event.message.role !== "assistant") return;
+
+    const hasThinking = event.message.content.some((c: any) => c.type === "thinking");
+    const hasText = event.message.content.some((c: any) => c.type === "text" && c.text?.trim());
+    const hasToolCall = event.message.content.some((c: any) => c.type === "toolCall");
+
+    // 思考开始 → 起 live 计时
+    if (hasThinking && !thinkingStartMs) {
+      thinkingStartMs = Date.now();
+      thinkingDone = false;
+      if (thinkingInterval) clearInterval(thinkingInterval);
+      thinkingInterval = setInterval(() => {
+        const s = Math.round((Date.now() - thinkingStartMs!) / 1000);
+        if (s >= 1) ctx.ui.setHiddenThinkingLabel(`thinking... ${s}s`);
+      }, 500);
+    }
+
+    // 思考结束 → 停计时，设最终标签
+    if (thinkingStartMs && !thinkingDone && (hasText || hasToolCall)) {
+      thinkingDone = true;
+      if (thinkingInterval) { clearInterval(thinkingInterval); thinkingInterval = null; }
+      const s = Math.round((Date.now() - thinkingStartMs) / 1000);
+      ctx.ui.setHiddenThinkingLabel(`Thought for ${s}s`);
+    }
+  });
+
+  pi.on("session_shutdown", () => {
+    resetThinking(null);
+    workingStartMs = null;
+    clearTimers();
+  });
+
+  // ── Thinking 结束标签写回（独立 handler，返回 {message} 替换）──
+  // 与 session_start 内的 footer 刷新 message_end 并存，互不干扰
+  pi.on("message_end", (event) => {
+    if (event.message.role !== "assistant") return;
+    if (!thinkingStartMs || !thinkingDone) return;
+    const s = Math.round((Date.now() - thinkingStartMs) / 1000);
+    const label = `Thought for ${s}s`;
+    resetThinking(null);
+    return {
+      message: {
+        ...event.message,
+        hiddenThinkingLabel: label,
+      },
+    };
   });
 
   pi.on("session_start", async (_event, ctx) => {

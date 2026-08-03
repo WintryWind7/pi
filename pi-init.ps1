@@ -70,12 +70,54 @@ Write-Host "  [OK] 依赖安装完成" -ForegroundColor Green
 # ============================================================================
 
 Write-Host ""
-Write-Host "==[ 2/4 构建 (npm run build) ]==" -ForegroundColor Cyan
+Write-Host "==[ 2/4 构建 ]==" -ForegroundColor Cyan
+
+# 构建策略：优先离线构建（不联网、不重新生成 data），失败时按原因分流：
+#   - data 缺失/过期（check:model-data 报 "missing or stale" / "does not exist"）
+#     → 回退到联网构建（npm run build，会跑 generate-models 拉 models.dev 生成 data）
+#   - 其他失败（真编译错误）→ 直接报错，不回退，避免无谓联网浪费时间
+# 联网回退仍失败（如访问不了 models.dev）→ 明确报错退出，提示从其他机器拷贝 data，
+# 不静默跳过，避免制造"看起来成功但 pi 不可用"的假象。
 Push-Location $RepoRoot
 try {
-	& npm run build
-	if ($LASTEXITCODE -ne 0) { throw "npm run build 失败 (exit $LASTEXITCODE)" }
 	$cliJs = Join-Path $CodingAgentDir "dist" "cli.js"
+
+	# 2a. 先尝试离线构建（用现有 data，不联网）
+	Write-Host "  尝试离线构建 (npm run build:offline)..." -ForegroundColor DarkGray
+	$offlineOutput = & npm run build:offline 2>&1 | Out-String
+	$offlineExit = $LASTEXITCODE
+
+	if ($offlineExit -eq 0) {
+		Write-Host "  [OK] 离线构建成功（data 已就位，跳过联网）" -ForegroundColor Green
+	} else {
+		# 判断是否 data 问题（check:model-data 的专属错误信号）
+		$isDataIssue = $offlineOutput -match "missing or stale|does not exist|Model data is"
+		if (-not $isDataIssue) {
+			# 真编译错误，直接报错，不回退
+			Write-Host $offlineOutput -ForegroundColor Red
+			throw "离线构建失败（非 data 问题，疑似编译错误，exit $offlineExit）"
+		}
+
+		# 2b. data 问题 → 回退联网构建（generate-models 会拉 models.dev）
+		Write-Host "  data 缺失或过期，回退联网构建 (npm run build)..." -ForegroundColor Yellow
+		Write-Host "  （此步会访问 models.dev 生成模型数据，需要网络）" -ForegroundColor DarkGray
+		$onlineOutput = & npm run build 2>&1 | Out-String
+		$onlineExit = $LASTEXITCODE
+		if ($onlineExit -ne 0) {
+			Write-Host $onlineOutput -ForegroundColor Red
+			throw @"
+联网构建失败 (exit $onlineExit)。
+
+data 缺失且联网生成失败（常见原因：无法访问 models.dev）。
+请从其他已就绪的机器拷贝 data 目录到本机：
+  源：packages/ai/src/providers/data/   （含 37 个 json + .manifest.json）
+  目标：$RepoPi\..\packages\ai\src\providers\data\
+拷贝完成后重跑本脚本，离线构建即可通过。
+"@
+		}
+		Write-Host "  [OK] 联网构建成功（已生成 data）" -ForegroundColor Green
+	}
+
 	if (-not (Test-Path $cliJs)) { throw "构建产物不存在：$cliJs" }
 } finally { Pop-Location }
 Write-Host "  [OK] 构建完成，dist/cli.js 已生成" -ForegroundColor Green

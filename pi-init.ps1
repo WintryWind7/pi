@@ -4,11 +4,12 @@
 	pi 仓库初始化脚本（供 AI 调用）：install + build + link + 同步配置，全流程固定。
 
 .DESCRIPTION
-	clone 后跑一次，全套就位。无交互、无选项，固定执行四步：
+	clone 后跑一次，全套就位。无交互、无选项，固定执行五步：
 	  1. npm install        安装 workspace 依赖
-	  2. npm run build      编译所有包，生成 dist/
+	  2. npm run build      编译所有包，生成 dist/（优先离线，data 缺失才联网）
 	  3. npm link           注册全局 pi 命令 → packages/coding-agent/dist/cli.js
 	  4. Junction 链接      ~/.pi/agent/{extensions,themes,prompts,skills} → 仓库 .pi/
+	  5. pi install         把正式扩展登记进 settings.json，让 pi 真正加载
 
 	所有路径相对脚本自身定位，clone 到任何位置都能用：
 	  - 仓库根  = 脚本所在目录
@@ -18,11 +19,19 @@
 	  - 仓库改一处，全局立刻生效（同一份实体）
 	  - AI 改"全局扩展"实际改的是仓库那份（操作系统透明重定向）
 	  - 物理上只有一份，不可能改错副本
-	只链接 extensions/themes/prompts/skills 四个目录，绝不触碰本机状态：
-	  auth.json(密钥) / sessions/ / bin/ / settings.json / models-* / trust.json / *.log
+
+	资源启用机制差异（已核实源码）：
+	  - skills/prompts/themes：pi 自动扫描 ~/.pi/agent/{skills,prompts,themes}/ 目录
+	    → 步骤 4 链接后即生效，无需登记
+	  - extensions：pi 只读 settings.json 的 packages 数组，不扫描目录
+	    → 步骤 4 链接只让文件就位，必须步骤 5 的 pi install 登记才被加载
+
+	步骤 5 只通过 `pi install` 向 settings.json 的 packages 数组追加扩展路径，
+	不触碰其他敏感本机状态：
+	  auth.json(密钥) / sessions/ / bin/ / models-* / trust.json / *.log
 	这些独立留在 ~/.pi/agent/，不进 git。
 
-	幂等：可重复运行。已链接的跳过，仓库更新后重跑即刷新（链接无需重建）。
+	幂等：可重复运行。已链接的跳过，pi install 对已登记扩展不会重复追加。
 #>
 
 $ErrorActionPreference = "Stop"
@@ -57,7 +66,7 @@ if (-not (Get-Command npm  -ErrorAction SilentlyContinue)) { Write-Error "未找
 # ============================================================================
 
 Write-Host ""
-Write-Host "==[ 1/4 安装依赖 (npm install) ]==" -ForegroundColor Cyan
+Write-Host "==[ 1/5 安装依赖 (npm install) ]==" -ForegroundColor Cyan
 Push-Location $RepoRoot
 try {
 	& npm install --no-fund --no-audit
@@ -70,7 +79,7 @@ Write-Host "  [OK] 依赖安装完成" -ForegroundColor Green
 # ============================================================================
 
 Write-Host ""
-Write-Host "==[ 2/4 构建 ]==" -ForegroundColor Cyan
+Write-Host "==[ 2/5 构建 ]==" -ForegroundColor Cyan
 
 # 构建策略：优先离线构建（不联网、不重新生成 data），失败时按原因分流：
 #   - data 缺失/过期（check:model-data 报 "missing or stale" / "does not exist"）
@@ -127,7 +136,7 @@ Write-Host "  [OK] 构建完成，dist/cli.js 已生成" -ForegroundColor Green
 # ============================================================================
 
 Write-Host ""
-Write-Host "==[ 3/4 全局 link (npm link) ]==" -ForegroundColor Cyan
+Write-Host "==[ 3/5 全局 link (npm link) ]==" -ForegroundColor Cyan
 Push-Location $CodingAgentDir
 try {
 	& npm link
@@ -148,12 +157,13 @@ if ($piCmd) {
 #   - AI 改"全局扩展"实际改的是仓库那份（操作系统透明重定向）
 #   - 物理上只有一份，不可能改错副本
 #
-# 只链接四类资源目录。绝不链接、绝不触碰本机状态文件：
-#   auth.json(密钥) / sessions/ / bin/ / settings.json / models-* / trust.json / *.log
+# 只链接四类资源目录。不链接本机状态文件：
+#   auth.json(密钥) / sessions/ / bin/ / models-* / trust.json / *.log
 # 这些独立留在 ~/.pi/agent/，不进 git。
+# 注：settings.json 不在此处链接，但步骤 5 会通过 pi install 往其 packages 数组登记扩展。
 
 Write-Host ""
-Write-Host "==[ 4/4 链接配置 ]==" -ForegroundColor Cyan
+Write-Host "==[ 4/5 链接配置 ]==" -ForegroundColor Cyan
 
 if (-not (Test-Path $GlobalAgent)) {
 	New-Item -ItemType Directory -Path $GlobalAgent -Force | Out-Null
@@ -216,6 +226,33 @@ foreach ($res in $Resources) {
 	# 创建 Junction：全局目录 → 仓库目录
 	New-Item -ItemType Junction -Path $dstDir -Target $srcDir -ErrorAction Stop | Out-Null
 	Write-Host "  [OK]   $res 链接 → $srcDir" -ForegroundColor Green
+}
+
+# ============================================================================
+# 步骤 5：登记扩展（pi install）
+# ============================================================================
+# extensions 与 skills/prompts/themes 不同：pi 只读 settings.json 的 packages
+# 数组，不扫描目录。步骤 4 的链接只让文件就位，必须在此登记才被 pi 加载。
+# 只登记正式扩展（目录型）；散落在 extensions/ 根的单文件（import-repro/tps/
+# redraws/prompt-url-widget）是开发调试工具，不登记。
+# 幂等：pi install 对已登记的扩展不会重复追加。
+
+Write-Host ""
+Write-Host "==[ 5/5 登记扩展 (pi install) ]==" -ForegroundColor Cyan
+
+$FormalExtensions = @("WintryWind7-prompt", "WintryWind7-ui")
+foreach ($extName in $FormalExtensions) {
+	$extPath = Join-Path $RepoPi "extensions" $extName
+	if (-not (Test-Path $extPath)) {
+		Write-Host "  [SKIP] $extName （仓库无此扩展目录：$extPath）" -ForegroundColor DarkGray
+		continue
+	}
+	# pi install 会把扩展路径登记进全局 settings.json 的 packages 数组
+	& pi install $extPath 2>&1 | Out-Host
+	if ($LASTEXITCODE -ne 0) {
+		throw "pi install $extName 失败 (exit $LASTEXITCODE)"
+	}
+	Write-Host "  [OK]   $extName 已登记" -ForegroundColor Green
 }
 
 # ============================================================================

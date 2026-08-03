@@ -93,12 +93,20 @@ export const VERCEL_AI_GATEWAY_MODELS = values as {
 		id: "alibaba/qwen3.6-plus";
 		provider: "vercel-ai-gateway";
 	};
+	"alibaba/qwen3.7-flash": Model<"anthropic-messages"> & {
+		id: "alibaba/qwen3.7-flash";
+		provider: "vercel-ai-gateway";
+	};
 	"alibaba/qwen3.7-max": Model<"anthropic-messages"> & {
 		id: "alibaba/qwen3.7-max";
 		provider: "vercel-ai-gateway";
 	};
 	"alibaba/qwen3.7-plus": Model<"anthropic-messages"> & {
 		id: "alibaba/qwen3.7-plus";
+		provider: "vercel-ai-gateway";
+	};
+	"alibaba/qwen3.8-max": Model<"anthropic-messages"> & {
+		id: "alibaba/qwen3.8-max";
 		provider: "vercel-ai-gateway";
 	};
 	"amazon/nova-2-lite": Model<"anthropic-messages"> & {
@@ -149,16 +157,20 @@ export const VERCEL_AI_GATEWAY_MODELS = values as {
 		id: "anthropic/claude-opus-4.7";
 		provider: "vercel-ai-gateway";
 	};
-	"anthropic/claude-opus-4.7-fast": Model<"anthropic-messages"> & {
-		id: "anthropic/claude-opus-4.7-fast";
-		provider: "vercel-ai-gateway";
-	};
 	"anthropic/claude-opus-4.8": Model<"anthropic-messages"> & {
 		id: "anthropic/claude-opus-4.8";
 		provider: "vercel-ai-gateway";
 	};
 	"anthropic/claude-opus-4.8-fast": Model<"anthropic-messages"> & {
 		id: "anthropic/claude-opus-4.8-fast";
+		provider: "vercel-ai-gateway";
+	};
+	"anthropic/claude-opus-5": Model<"anthropic-messages"> & {
+		id: "anthropic/claude-opus-5";
+		provider: "vercel-ai-gateway";
+	};
+	"anthropic/claude-opus-5-fast": Model<"anthropic-messages"> & {
+		id: "anthropic/claude-opus-5-fast";
 		provider: "vercel-ai-gateway";
 	};
 	"anthropic/claude-sonnet-4": Model<"anthropic-messages"> & {
@@ -225,6 +237,10 @@ export const VERCEL_AI_GATEWAY_MODELS = values as {
 		id: "deepseek/deepseek-v4-flash";
 		provider: "vercel-ai-gateway";
 	};
+	"deepseek/deepseek-v4-flash-0731": Model<"anthropic-messages"> & {
+		id: "deepseek/deepseek-v4-flash-0731";
+		provider: "vercel-ai-gateway";
+	};
 	"deepseek/deepseek-v4-pro": Model<"anthropic-messages"> & {
 		id: "deepseek/deepseek-v4-pro";
 		provider: "vercel-ai-gateway";
@@ -245,16 +261,8 @@ export const VERCEL_AI_GATEWAY_MODELS = values as {
 		id: "google/gemini-3-flash";
 		provider: "vercel-ai-gateway";
 	};
-	"google/gemini-3-pro-preview": Model<"anthropic-messages"> & {
-		id: "google/gemini-3-pro-preview";
-		provider: "vercel-ai-gateway";
-	};
 	"google/gemini-3.1-flash-lite": Model<"anthropic-messages"> & {
 		id: "google/gemini-3.1-flash-lite";
-		provider: "vercel-ai-gateway";
-	};
-	"google/gemini-3.1-flash-lite-preview": Model<"anthropic-messages"> & {
-		id: "google/gemini-3.1-flash-lite-preview";
 		provider: "vercel-ai-gateway";
 	};
 	"google/gemini-3.1-pro-preview": Model<"anthropic-messages"> & {
@@ -287,6 +295,10 @@ export const VERCEL_AI_GATEWAY_MODELS = values as {
 	};
 	"inception/mercury-coder-small": Model<"anthropic-messages"> & {
 		id: "inception/mercury-coder-small";
+		provider: "vercel-ai-gateway";
+	};
+	"inclusionai/ling-3.0-flash-free": Model<"anthropic-messages"> & {
+		id: "inclusionai/ling-3.0-flash-free";
 		provider: "vercel-ai-gateway";
 	};
 	"interfaze/interfaze-beta": Model<"anthropic-messages"> & {
@@ -449,6 +461,10 @@ export const VERCEL_AI_GATEWAY_MODELS = values as {
 		id: "moonshotai/kimi-k3";
 		provider: "vercel-ai-gateway";
 	};
+	"moonshotai/kimi-k3-fast": Model<"anthropic-messages"> & {
+		id: "moonshotai/kimi-k3-fast";
+		provider: "vercel-ai-gateway";
+	};
 	"nvidia/nemotron-3-nano-30b-a3b": Model<"anthropic-messages"> & {
 		id: "nvidia/nemotron-3-nano-30b-a3b";
 		provider: "vercel-ai-gateway";
@@ -501,10 +517,6 @@ export const VERCEL_AI_GATEWAY_MODELS = values as {
 		id: "openai/gpt-5";
 		provider: "vercel-ai-gateway";
 	};
-	"openai/gpt-5-chat": Model<"anthropic-messages"> & {
-		id: "openai/gpt-5-chat";
-		provider: "vercel-ai-gateway";
-	};
 	"openai/gpt-5-codex": Model<"anthropic-messages"> & {
 		id: "openai/gpt-5-codex";
 		provider: "vercel-ai-gateway";
@@ -543,10 +555,6 @@ export const VERCEL_AI_GATEWAY_MODELS = values as {
 	};
 	"openai/gpt-5.2": Model<"anthropic-messages"> & {
 		id: "openai/gpt-5.2";
-		provider: "vercel-ai-gateway";
-	};
-	"openai/gpt-5.2-chat": Model<"anthropic-messages"> & {
-		id: "openai/gpt-5.2-chat";
 		provider: "vercel-ai-gateway";
 	};
 	"openai/gpt-5.2-codex": Model<"anthropic-messages"> & {
@@ -637,6 +645,14 @@ export const VERCEL_AI_GATEWAY_MODELS = values as {
 		id: "openai/o4-mini";
 		provider: "vercel-ai-gateway";
 	};
+	"poolside/laguna-s-2.1": Model<"anthropic-messages"> & {
+		id: "poolside/laguna-s-2.1";
+		provider: "vercel-ai-gateway";
+	};
+	"poolside/laguna-s-2.1-free": Model<"anthropic-messages"> & {
+		id: "poolside/laguna-s-2.1-free";
+		provider: "vercel-ai-gateway";
+	};
 	"sakana/fugu-ultra": Model<"anthropic-messages"> & {
 		id: "sakana/fugu-ultra";
 		provider: "vercel-ai-gateway";
@@ -649,8 +665,16 @@ export const VERCEL_AI_GATEWAY_MODELS = values as {
 		id: "stepfun/step-3.7-flash";
 		provider: "vercel-ai-gateway";
 	};
+	"tencent/hy3": Model<"anthropic-messages"> & {
+		id: "tencent/hy3";
+		provider: "vercel-ai-gateway";
+	};
 	"thinkingmachines/inkling": Model<"anthropic-messages"> & {
 		id: "thinkingmachines/inkling";
+		provider: "vercel-ai-gateway";
+	};
+	"thinkingmachines/inkling-small": Model<"anthropic-messages"> & {
+		id: "thinkingmachines/inkling-small";
 		provider: "vercel-ai-gateway";
 	};
 	"xai/grok-4.1-fast-non-reasoning": Model<"anthropic-messages"> & {

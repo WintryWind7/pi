@@ -1336,7 +1336,16 @@ export class DefaultPackageManager implements PackageManager {
 				metadata.baseDir = resolved;
 				const resources = this.collectPackageResources(resolved, accumulator, filter, metadata);
 				if (!resources) {
-					this.addResource(accumulator.extensions, resolved, metadata, true);
+					// 目录本身是单个扩展时，解析出入口文件（index.ts/index.js），
+					// 避免与自动发现产生的文件路径因目录/文件形态不同而无法去重。
+					const entries = resolveExtensionEntries(resolved);
+					if (entries && entries.length > 0) {
+						for (const entry of entries) {
+							this.addResource(accumulator.extensions, entry, metadata, true);
+						}
+					} else {
+						this.addResource(accumulator.extensions, resolved, metadata, true);
+					}
 				}
 			}
 		} catch {

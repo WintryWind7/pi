@@ -122,6 +122,21 @@ describe("DefaultPackageManager", () => {
 			expect(result.extensions.some((r) => r.path === extPath && r.enabled)).toBe(true);
 		});
 
+		it("should dedupe a directory package extension against auto-discovered index.ts", async () => {
+			// 同一扩展以两种形态被发现：settings packages 注册目录路径，自动发现扫描出 index.ts 文件路径。
+			// 两者 canonicalize 后仍不相同，此前会解析出两个实例。
+			const projectExtDir = join(tempDir, ".pi", "extensions", "my-ext");
+			mkdirSync(projectExtDir, { recursive: true });
+			writeFileSync(join(projectExtDir, "index.ts"), "export default function() {}");
+
+			settingsManager.setPackages([join(tempDir, ".pi", "extensions", "my-ext")]);
+
+			const result = await packageManager.resolve();
+			const myExtResources = result.extensions.filter((r) => normalizeForMatch(r.path).includes("my-ext"));
+			expect(myExtResources).toHaveLength(1);
+			expect(myExtResources[0].path).toBe(join(projectExtDir, "index.ts"));
+		});
+
 		it("should resolve skill paths from settings", async () => {
 			const skillDir = join(agentDir, "skills", "my-skill");
 			mkdirSync(skillDir, { recursive: true });

@@ -11,7 +11,8 @@ import type { KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import { isAbsolute, relative, resolve, sep, join } from "node:path";
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { execSync } from "node:child_process";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 
 function formatTokens(count: number): string {
   if (count < 1000) return count.toString();
@@ -77,56 +78,70 @@ interface GitStatus {
   stashed: boolean;
 }
 
-// ── 避免每帧跑 git ──
+// ── git 状态：异步刷新 + 缓存，render 不阻塞 ──
 let _gitStatusCache: { status: GitStatus | null; ts: number } | null = null;
-const GIT_STATUS_TTL = 3000;
+let _gitStatusFetching = false;
+let _onGitStatusChange: (() => void) | null = null;
+const GIT_STATUS_TTL = 4000;
+const execAsync = promisify(exec);
 
 function getGitStatus(): GitStatus | null {
   if (_gitStatusCache && Date.now() - _gitStatusCache.ts < GIT_STATUS_TTL) {
     return _gitStatusCache.status;
   }
+  // 缓存过期：触发异步刷新，本次先返回旧值（不阻塞渲染）
+  void refreshGitStatus();
+  return _gitStatusCache?.status ?? null;
+}
 
-  try {
-    const out = execSync("git rev-parse --git-dir", { encoding: "utf8", stdio: "pipe", timeout: 2000 });
-    if (!out.trim()) {
-      _gitStatusCache = { status: null, ts: Date.now() };
-      return null;
-    }
-  } catch {
-    _gitStatusCache = { status: null, ts: Date.now() };
-    return null;
-  }
+async function refreshGitStatus(): Promise<void> {
+  if (_gitStatusFetching) return;
+  _gitStatusFetching = true;
+  const status = await fetchGitStatusAsync();
+  _gitStatusCache = { status, ts: Date.now() };
+  _gitStatusFetching = false;
+  _onGitStatusChange?.();
+}
+
+async function fetchGitStatusAsync(): Promise<GitStatus | null> {
+  const isRepo = await execAsync("git rev-parse --is-inside-work-tree", {
+    encoding: "utf8", timeout: 2000, windowsHide: true,
+  })
+    .then(({ stdout }) => stdout.trim() === "true")
+    .catch(() => false);
+  if (!isRepo) return null;
 
   const status: GitStatus = { modified: false, untracked: false, staged: false, ahead: 0, behind: 0, conflicted: false, stashed: false };
 
-  try {
-    const porcelain = execSync("git status --porcelain", { encoding: "utf8", stdio: "pipe", timeout: 2000 });
-    for (const line of porcelain.split("\n")) {
+  // 三个命令互不依赖，并行执行
+  const [porcelain, aheadBehind, stashList] = await Promise.all([
+    execAsync("git status --porcelain", { encoding: "utf8", timeout: 2000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 }).catch(() => null),
+    execAsync("git rev-list --left-right --count @{u}...HEAD 2>/dev/null", { encoding: "utf8", timeout: 2000, windowsHide: true, shell: true }).catch(() => null),
+    execAsync("git stash list", { encoding: "utf8", timeout: 2000, windowsHide: true, maxBuffer: 1024 * 1024 }).catch(() => null),
+  ]);
+
+  if (porcelain) {
+    for (const line of porcelain.stdout.split("\n")) {
       const idx = line.slice(0, 2);
       if (idx.includes("M")) status.modified = true;
       if (idx.includes("?")) status.untracked = true;
       if (idx.includes("A") || idx.includes("D") || idx.includes("R")) status.staged = true;
       if (idx.includes("U")) status.conflicted = true;
     }
-  } catch { /* ok */ }
+  }
 
-  try {
-    const aheadBehind = execSync("git rev-list --left-right --count @{u}...HEAD 2>/dev/null", {
-      encoding: "utf8", stdio: "pipe", timeout: 2000, shell: true,
-    });
-    const parts = aheadBehind.trim().split(/\s+/);
+  if (aheadBehind) {
+    const parts = aheadBehind.stdout.trim().split(/\s+/);
     if (parts.length === 2) {
       status.ahead = parseInt(parts[1], 10) || 0;
       status.behind = parseInt(parts[0], 10) || 0;
     }
-  } catch { /* ok */ }
+  }
 
-  try {
-    const stashList = execSync("git stash list", { encoding: "utf8", stdio: "pipe", timeout: 2000 });
-    status.stashed = stashList.trim().length > 0;
-  } catch { /* ok */ }
+  if (stashList) {
+    status.stashed = stashList.stdout.trim().length > 0;
+  }
 
-  _gitStatusCache = { status, ts: Date.now() };
   return status;
 }
 
@@ -137,24 +152,17 @@ function fmtTime(ms: number): string {
 }
 
 export default function (pi: ExtensionAPI) {
-  // ── Thinking / Working 计时状态 ──
-  let thinkingStartMs: number | null = null;
-  let thinkingDone = false;
-  let thinkingInterval: ReturnType<typeof setInterval> | null = null;
+  // ── Working / Thinking 计时状态 ──
+  // thinking 段用事件驱动（按 message_update 最后一个 content 块类型判断起止），不设定时器；
+  // 实时读秒复用 working 的定时器拼字符串，避免 setHiddenThinkingLabel 全量重建历史消息。
   let workingStartMs: number | null = null;
   let workingInterval: ReturnType<typeof setInterval> | null = null;
-
-  const clearTimers = () => {
-    if (thinkingInterval) { clearInterval(thinkingInterval); thinkingInterval = null; }
-    if (workingInterval) { clearInterval(workingInterval); workingInterval = null; }
-  };
-
-  const resetThinking = (ctx: any) => {
-    thinkingStartMs = null;
-    thinkingDone = false;
-    if (thinkingInterval) { clearInterval(thinkingInterval); thinkingInterval = null; }
-    if (ctx?.hasUI) ctx.ui.setHiddenThinkingLabel();
-  };
+  let thinkingSegmentStartMs: number | null = null;
+  let msgThinkingMs = 0;
+  // 思考段结束后的 "Thought for" 短暂展示：时长 + 展示截止时间
+  let lastThoughtMs: number | null = null;
+  let thoughtShowUntil = 0;
+  const THOUGHT_SHOW_MS = 1500;
 
   // ── 对话标签：User: / Reply: ──
   let replyLabelAdded = false;
@@ -179,73 +187,89 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("message_start", async (event) => {
-    if (event.message.role === "assistant" && !replyLabelAdded) {
-      replyLabelAdded = true;
-      pi.appendEntry("reply-label", {});
+    if (event.message.role === "assistant") {
+      if (!replyLabelAdded) {
+        replyLabelAdded = true;
+        pi.appendEntry("reply-label", {});
+      }
+      thinkingSegmentStartMs = null;
+      msgThinkingMs = 0;
+      lastThoughtMs = null;
+      thoughtShowUntil = 0;
     }
   });
 
-  // ── Working: 总用时（编辑器下方 "Working... (Xs)"）──
+  // ── Working: 总用时 + 思考段实时计时（编辑器下方）──
   pi.on("agent_start", (_event, ctx) => {
     if (!ctx.hasUI) return;
-    resetThinking(ctx);
     workingStartMs = Date.now();
+    thinkingSegmentStartMs = null;
+    msgThinkingMs = 0;
+    lastThoughtMs = null;
+    thoughtShowUntil = 0;
     if (workingInterval) clearInterval(workingInterval);
     workingInterval = setInterval(() => {
-      ctx.ui.setWorkingMessage(`Working... (${fmtTime(Date.now() - workingStartMs!)})`);
+      const working = fmtTime(Date.now() - workingStartMs!);
+      let detail = "";
+      if (thinkingSegmentStartMs !== null) {
+        detail = ` · thinking for ${fmtTime(Date.now() - thinkingSegmentStartMs)}`;
+      } else if (lastThoughtMs !== null && Date.now() < thoughtShowUntil) {
+        detail = ` · Thought for ${fmtTime(lastThoughtMs)}`;
+      }
+      ctx.ui.setWorkingMessage(`Working... (${working}${detail})`);
     }, 500);
   });
 
   pi.on("agent_end", (_event, ctx) => {
     if (!ctx.hasUI) return;
     workingStartMs = null;
+    thinkingSegmentStartMs = null;
+    lastThoughtMs = null;
+    thoughtShowUntil = 0;
     if (workingInterval) { clearInterval(workingInterval); workingInterval = null; }
     ctx.ui.setWorkingMessage();
   });
 
-  // ── Thinking: live 计时 + 结束标签 ──
-  pi.on("message_update", (event, ctx) => {
-    if (!ctx.hasUI) return;
+  // ── Thinking 段检测（事件驱动，无定时器）──
+  // 以当前正在生成的 content 块类型判断：变成 thinking 记段起点，
+  // 离开 thinking（text/toolCall）段结束并累计时长。
+  pi.on("message_update", (event) => {
     if (event.message.role !== "assistant") return;
 
-    const hasThinking = event.message.content.some((c: any) => c.type === "thinking");
-    const hasText = event.message.content.some((c: any) => c.type === "text" && c.text?.trim());
-    const hasToolCall = event.message.content.some((c: any) => c.type === "toolCall");
+    const content = event.message.content as { type: string }[];
+    const lastType = content[content.length - 1]?.type ?? null;
 
-    // 思考开始 → 起 live 计时
-    if (hasThinking && !thinkingStartMs) {
-      thinkingStartMs = Date.now();
-      thinkingDone = false;
-      if (thinkingInterval) clearInterval(thinkingInterval);
-      thinkingInterval = setInterval(() => {
-        const s = Math.round((Date.now() - thinkingStartMs!) / 1000);
-        if (s >= 1) ctx.ui.setHiddenThinkingLabel(`thinking... ${s}s`);
-      }, 500);
-    }
-
-    // 思考结束 → 停计时，设最终标签
-    if (thinkingStartMs && !thinkingDone && (hasText || hasToolCall)) {
-      thinkingDone = true;
-      if (thinkingInterval) { clearInterval(thinkingInterval); thinkingInterval = null; }
-      const s = Math.round((Date.now() - thinkingStartMs) / 1000);
-      ctx.ui.setHiddenThinkingLabel(`Thought for ${s}s`);
+    if (lastType === "thinking") {
+      if (thinkingSegmentStartMs === null) thinkingSegmentStartMs = Date.now();
+    } else if (thinkingSegmentStartMs !== null) {
+      const segMs = Date.now() - thinkingSegmentStartMs;
+      msgThinkingMs += segMs;
+      thinkingSegmentStartMs = null;
+      lastThoughtMs = segMs;
+      thoughtShowUntil = Date.now() + THOUGHT_SHOW_MS;
     }
   });
 
   pi.on("session_shutdown", () => {
-    resetThinking(null);
     workingStartMs = null;
-    clearTimers();
+    thinkingSegmentStartMs = null;
+    msgThinkingMs = 0;
+    lastThoughtMs = null;
+    thoughtShowUntil = 0;
+    if (workingInterval) { clearInterval(workingInterval); workingInterval = null; }
   });
 
   // ── Thinking 结束标签写回（独立 handler，返回 {message} 替换）──
   // 与 session_start 内的 footer 刷新 message_end 并存，互不干扰
   pi.on("message_end", (event) => {
     if (event.message.role !== "assistant") return;
-    if (!thinkingStartMs || !thinkingDone) return;
-    const s = Math.round((Date.now() - thinkingStartMs) / 1000);
-    const label = `Thought for ${s}s`;
-    resetThinking(null);
+    if (thinkingSegmentStartMs !== null) {
+      msgThinkingMs += Date.now() - thinkingSegmentStartMs;
+      thinkingSegmentStartMs = null;
+    }
+    if (msgThinkingMs <= 0) return;
+    const label = `Thought for ${Math.round(msgThinkingMs / 1000)}s`;
+    msgThinkingMs = 0;
     return {
       message: {
         ...event.message,
@@ -313,6 +337,8 @@ export default function (pi: ExtensionAPI) {
 
     ctx.ui.setFooter((_tui, theme, footerData) => {
       const unsub = footerData.onBranchChange(() => _tui.requestRender());
+      // git 状态异步刷新完成后，通知 footer 重新渲染
+      _onGitStatusChange = () => _tui.requestRender();
 
       let _statsCache: string | null = null;
 
@@ -357,7 +383,10 @@ export default function (pi: ExtensionAPI) {
       invalidateStats = () => { _statsCache = null; };
 
       return {
-        dispose: unsub,
+        dispose: () => {
+          _onGitStatusChange = null;
+          unsub();
+        },
         invalidate() {},
         render(width: number): string[] {
           const home = process.env.HOME || process.env.USERPROFILE;

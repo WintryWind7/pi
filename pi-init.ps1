@@ -8,8 +8,8 @@
 	  1. npm install        安装 workspace 依赖
 	  2. npm run build      编译所有包，生成 dist/（优先离线，data 缺失才联网）
 	  3. npm link           注册全局 pi 命令 → packages/coding-agent/dist/cli.js
-	  4. Junction 链接      ~/.pi/agent/{extensions,themes,prompts,skills} → 仓库 .pi/
-	  5. pi install         把正式扩展登记进 settings.json，让 pi 真正加载
+	  4. 配置同步           链接资源目录，并同步第三方插件配置
+	  5. pi install         登记正式扩展，并安装固定版本的全局第三方包
 
 	所有路径相对脚本自身定位，clone 到任何位置都能用：
 	  - 仓库根  = 脚本所在目录
@@ -19,14 +19,18 @@
 	  - 仓库改一处，全局立刻生效（同一份实体）
 	  - AI 改"全局扩展"实际改的是仓库那份（操作系统透明重定向）
 	  - 物理上只有一份，不可能改错副本
+	第三方插件的非敏感配置由仓库 .pi/web-search.json 管理，并在步骤 4
+	同步到 ~/.pi/web-search.json。
 
 	资源启用机制差异（已核实源码）：
 	  - skills/prompts/themes：pi 自动扫描 ~/.pi/agent/{skills,prompts,themes}/ 目录
 	    → 步骤 4 链接后即生效，无需登记
 	  - extensions：pi 只读 settings.json 的 packages 数组，不扫描目录
 	    → 步骤 4 链接只让文件就位，必须步骤 5 的 pi install 登记才被加载
+	  - 第三方 npm 包：步骤 5 固定版本安装到 ~/.pi/agent/npm/，并登记进
+	    settings.json；另一台机器 clone 后运行本脚本即可恢复
 
-	步骤 5 只通过 `pi install` 向 settings.json 的 packages 数组追加扩展路径，
+	步骤 5 只通过 `pi install` 登记仓库扩展路径和固定版本 npm 包，
 	不触碰其他敏感本机状态：
 	  auth.json(密钥) / sessions/ / bin/ / models-* / trust.json / *.log
 	这些独立留在 ~/.pi/agent/，不进 git。
@@ -43,7 +47,8 @@ $ErrorActionPreference = "Stop"
 $RepoRoot       = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoPi         = Join-Path $RepoRoot ".pi"
 $CodingAgentDir = Join-Path $RepoRoot "packages" "coding-agent"
-$GlobalAgent    = Join-Path $HOME ".pi" "agent"
+$GlobalPi       = Join-Path $HOME ".pi"
+$GlobalAgent    = Join-Path $GlobalPi "agent"
 $Resources      = @("extensions", "themes", "prompts", "skills")
 
 # ============================================================================
@@ -150,7 +155,7 @@ if ($piCmd) {
 }
 
 # ============================================================================
-# 步骤 4：链接配置（~/.pi/agent/{ext,themes,prompts,skills} → 仓库 .pi/）
+# 步骤 4：链接资源并同步第三方插件配置
 # ============================================================================
 # 用 Junction（目录连接）把全局目录链接到仓库，达成"仓库为单一配置源"：
 #   - 仓库改了 → 全局立刻生效（同一份实体）
@@ -228,17 +233,27 @@ foreach ($res in $Resources) {
 	Write-Host "  [OK]   $res 链接 → $srcDir" -ForegroundColor Green
 }
 
+$repoWebSearchConfig = Join-Path $RepoPi "web-search.json"
+$globalWebSearchConfig = Join-Path $GlobalPi "web-search.json"
+if (Test-Path $repoWebSearchConfig) {
+	Copy-Item -Path $repoWebSearchConfig -Destination $globalWebSearchConfig -Force
+	Write-Host "  [OK]   web-search.json 已同步 → $globalWebSearchConfig" -ForegroundColor Green
+} else {
+	Write-Host "  [SKIP] web-search.json（仓库无此配置）" -ForegroundColor DarkGray
+}
+
 # ============================================================================
-# 步骤 5：登记扩展（pi install）
+# 步骤 5：登记扩展与安装第三方包（pi install）
 # ============================================================================
 # extensions 与 skills/prompts/themes 不同：pi 只读 settings.json 的 packages
 # 数组，不扫描目录。步骤 4 的链接只让文件就位，必须在此登记才被 pi 加载。
 # 只登记正式扩展（目录型）；散落在 extensions/ 根的单文件（import-repro/tps/
 # redraws/prompt-url-widget）是开发调试工具，不登记。
-# 幂等：pi install 对已登记的扩展不会重复追加。
+# 固定版本 npm 包同样在此安装并登记；安装命令强制官方 registry、TLS 校验和
+# ignore-scripts。pi install 对已登记扩展和已安装固定版本包保持幂等。
 
 Write-Host ""
-Write-Host "==[ 5/5 登记扩展 (pi install) ]==" -ForegroundColor Cyan
+Write-Host "==[ 5/5 登记扩展与安装第三方包 (pi install) ]==" -ForegroundColor Cyan
 
 $FormalExtensions = @("WintryWind7-prompt", "WintryWind7-ui")
 foreach ($extName in $FormalExtensions) {
@@ -255,6 +270,28 @@ foreach ($extName in $FormalExtensions) {
 	Write-Host "  [OK]   $extName 已登记" -ForegroundColor Green
 }
 
+$GlobalPackages = @("npm:pi-web-access@0.19.0")
+$previousTlsSetting = [Environment]::GetEnvironmentVariable("NODE_TLS_REJECT_UNAUTHORIZED", "Process")
+$previousRegistrySetting = [Environment]::GetEnvironmentVariable("npm_config_registry", "Process")
+$previousIgnoreScriptsSetting = [Environment]::GetEnvironmentVariable("npm_config_ignore_scripts", "Process")
+try {
+	[Environment]::SetEnvironmentVariable("NODE_TLS_REJECT_UNAUTHORIZED", "1", "Process")
+	[Environment]::SetEnvironmentVariable("npm_config_registry", "https://registry.npmjs.org", "Process")
+	[Environment]::SetEnvironmentVariable("npm_config_ignore_scripts", "true", "Process")
+
+	foreach ($package in $GlobalPackages) {
+		& pi install $package 2>&1 | Out-Host
+		if ($LASTEXITCODE -ne 0) {
+			throw "pi install $package 失败 (exit $LASTEXITCODE)"
+		}
+		Write-Host "  [OK]   $package 已安装" -ForegroundColor Green
+	}
+} finally {
+	[Environment]::SetEnvironmentVariable("NODE_TLS_REJECT_UNAUTHORIZED", $previousTlsSetting, "Process")
+	[Environment]::SetEnvironmentVariable("npm_config_registry", $previousRegistrySetting, "Process")
+	[Environment]::SetEnvironmentVariable("npm_config_ignore_scripts", $previousIgnoreScriptsSetting, "Process")
+}
+
 # ============================================================================
 # 完成
 # ============================================================================
@@ -263,4 +300,4 @@ Write-Host ""
 Write-Host "================================" -ForegroundColor Green
 Write-Host "  pi 初始化完成" -ForegroundColor Green
 Write-Host "================================" -ForegroundColor Green
-Write-Host "任意目录运行 pi 即可使用本仓库的扩展与主题。" -ForegroundColor White
+Write-Host "任意目录运行 pi 即可使用本仓库的扩展、主题与联网工具。" -ForegroundColor White

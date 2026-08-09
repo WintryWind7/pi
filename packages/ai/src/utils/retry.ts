@@ -41,6 +41,7 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 	// Wrapper/provider text for transient upstream failures, including OpenRouter
 	// "Provider returned error" responses (#2264).
 	"provider.?returned.?error",
+	"exceeded request buffer limit while retrying upstream",
 
 	// Network, proxy, and fetch transport failures. This includes OpenAI Codex
 	// raw-fetch failures such as "upstream connect", "connection refused", and
@@ -51,6 +52,9 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 	"connection.?lost",
 	"other side closed",
 	"fetch failed",
+	"getaddrinfo",
+	"ENOTFOUND",
+	"EAI_AGAIN",
 	"upstream.?connect",
 	"reset before headers",
 	"socket hang up",

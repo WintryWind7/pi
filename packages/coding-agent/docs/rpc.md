@@ -23,7 +23,7 @@ Common options:
 - **Responses**: JSON objects with `type: "response"` indicating command success/failure
 - **Events**: Agent events streamed to stdout as JSON lines
 
-All commands support an optional `id` field for request/response correlation. If provided, the corresponding response will include the same `id`.
+All commands support an optional `id` field for request/response correlation. If provided, the corresponding response will include the same `id`. `bash_execution_update` events also include the `id` of their originating `bash` command.
 
 ### Framing
 
@@ -455,15 +455,18 @@ Response:
 
 #### bash
 
-Execute a shell command and add output to conversation context.
+Execute a shell command and add output to conversation context. Output streams as `bash_execution_update` events while the command runs; the response contains the final result.
 
 ```json
-{"type": "bash", "command": "ls -la"}
+{"id": "req-1", "type": "bash", "command": "ls -la"}
 ```
+
+Include an `id` to associate streamed `bash_execution_update` events with this command.
 
 Response:
 ```json
 {
+  "id": "req-1",
   "type": "response",
   "command": "bash",
   "success": true,
@@ -494,7 +497,7 @@ If output was truncated, includes `fullOutputPath`:
 
 **How bash results reach the LLM:**
 
-The `bash` command executes immediately and returns a `BashResult`. Internally, a `BashExecutionMessage` is created and stored in the agent's message state. This message does NOT emit an event.
+The `bash` command executes immediately and returns a `BashResult`. Internally, a `BashExecutionMessage` is created and stored in the agent's message state.
 
 When the next `prompt` command is sent, all messages (including `BashExecutionMessage`) are transformed before being sent to the LLM. The `BashExecutionMessage` is converted to a `UserMessage` with this format:
 
@@ -509,7 +512,6 @@ drwxr-xr-x ...
 This means:
 1. Bash output is included in the LLM context on the **next prompt**, not immediately
 2. Multiple bash commands can be executed before a prompt; all outputs will be included
-3. No event is emitted for the `BashExecutionMessage` itself
 
 #### abort_bash
 
@@ -829,7 +831,7 @@ Each command has:
 
 ## Events
 
-Events are streamed to stdout as JSON lines during agent operation. Events do NOT include an `id` field (only responses do).
+Events are streamed to stdout as JSON lines during agent operation. Events do not generally include an `id` field; `bash_execution_update` includes the `id` of its originating `bash` command when one was provided.
 
 ### Event Types
 
@@ -843,6 +845,7 @@ Events are streamed to stdout as JSON lines during agent operation. Events do NO
 | `message_start` | Message begins |
 | `message_update` | Streaming update (text/thinking/toolcall deltas) |
 | `message_end` | Message completes |
+| `bash_execution_update` | Direct RPC bash command output chunk |
 | `tool_execution_start` | Tool begins execution |
 | `tool_execution_update` | Tool execution progress (streaming output) |
 | `tool_execution_end` | Tool completes |
@@ -911,17 +914,15 @@ Emitted when a message begins and completes. The `message` field contains an `Ag
 
 ### message_update (Streaming)
 
-Emitted during streaming of assistant messages. Contains both the partial message and a streaming delta event.
+Emitted during streaming of assistant messages. Contains a delta event without a cumulative message snapshot.
 
 ```json
 {
   "type": "message_update",
-  "message": {...},
   "assistantMessageEvent": {
     "type": "text_delta",
     "contentIndex": 0,
-    "delta": "Hello ",
-    "partial": {...}
+    "delta": "Hello "
   }
 }
 ```
@@ -930,7 +931,6 @@ The `assistantMessageEvent` field contains one of these delta types:
 
 | Type | Description |
 |------|-------------|
-| `start` | Message generation started |
 | `text_start` | Text content block started |
 | `text_delta` | Text content chunk |
 | `text_end` | Text content block ended |
@@ -940,15 +940,33 @@ The `assistantMessageEvent` field contains one of these delta types:
 | `toolcall_start` | Tool call started |
 | `toolcall_delta` | Tool call arguments chunk |
 | `toolcall_end` | Tool call ended (includes full `toolCall` object) |
-| `done` | Message complete (reason: `"stop"`, `"length"`, `"toolUse"`) |
-| `error` | Error occurred (reason: `"aborted"`, `"error"`) |
 
 Example streaming a text response:
 ```json
-{"type":"message_update","message":{...},"assistantMessageEvent":{"type":"text_start","contentIndex":0,"partial":{...}}}
-{"type":"message_update","message":{...},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hello","partial":{...}}}
-{"type":"message_update","message":{...},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" world","partial":{...}}}
-{"type":"message_update","message":{...},"assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"Hello world","partial":{...}}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hello"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" world"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"Hello world"}}
+```
+
+`message_update` intentionally omits the former cumulative `message` field and
+`assistantMessageEvent.partial`. Clients that need a live partial message must assemble it
+from `message_start` and subsequent events using `contentIndex`. Treat `message_end.message`
+as authoritative. For tool calls, buffer `toolcall_delta.delta`; `toolcall_end.toolCall`
+contains the completed call.
+
+### bash_execution_update
+
+Emitted once for each output chunk from a direct `bash` command. `id` matches the command's `id`, allowing clients to associate output with the correct command.
+
+Events stream all output while the command runs, even if the final `bash` response's `output` is truncated.
+
+```json
+{
+  "type": "bash_execution_update",
+  "id": "req-1",
+  "delta": "total 48\n"
+}
 ```
 
 ### tool_execution_start / tool_execution_update / tool_execution_end
@@ -1345,6 +1363,7 @@ Source files:
 - [`packages/ai/src/types.ts`](../../ai/src/types.ts) - `Model`, `UserMessage`, `AssistantMessage`, `ToolResultMessage`
 - [`packages/agent/src/types.ts`](../../agent/src/types.ts) - `AgentMessage`, `AgentEvent`
 - [`src/core/messages.ts`](../src/core/messages.ts) - `BashExecutionMessage`
+- [`src/modes/json-event.ts`](../src/modes/json-event.ts) - `JsonAgentSessionEvent`
 - [`src/modes/rpc/rpc-types.ts`](../src/modes/rpc/rpc-types.ts) - RPC command/response types, extension UI request/response types
 
 ### Model
